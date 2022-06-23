@@ -22,6 +22,12 @@ C. read_slug should check if a pickled output already exists.
 head = re.compile("(https://www.|https://|http://www.|http://|www.)")
 tailslash = re.compile("/$")
 
+timerange = pd.datetime.dt(2021,6,1) #time cutoff - otherwise there are too many slugs to check
+
+SLUGS_FILE = "slug_info.csv" #Download from the Google sheets the "Slug Info sheet of the 2021/22 tracker"
+TRACKER_FILE = "tracker2022.csv"
+PICKLE_FILE = "dump.pickle"
+
 def clean(s):
     return tailslash.sub("",(head.sub("",s)))
 
@@ -66,17 +72,11 @@ def assign_outlet():
     outlets.dropna(subset=["Website"],inplace=True)
     outlets["Website"] = outlets["Website"].str.lower()
 
-
-    # for i in range(80,90):
-    #     print(outlets["Website"].iloc[i])
-    #     print(match(outlets["Website"].iloc[i]))
-    #     print("-------")
-
     outlets["domain"] = outlets["Website"].apply(clean)
 
     meltwater["Pub_SuggestedName"] = meltwater["URL"].apply(find_dom)
 
-    meltwater.to_csv("output.csv")
+    meltwater.to_csv("out-outlets.csv")
 
 
 def read_slugs():
@@ -85,12 +85,7 @@ def read_slugs():
     This function reads existing slugs; i.e., it accesses WCIJ stories correspoding to slug name,
     and pickles the result. Below I restrict the time range because the full slugs list is quite long.
     """
-
-    #I downloaded from the Google sheets the "Slug Info sheet of the 2021 tracker"
-    slugs = pd.read_csv("slug_info.csv", parse_dates=[1])
-
-    #time cutoff - otherwise there are too many slugs to check
-    timerange = pd.datetime.dt(2021,6,1)
+    slugs = pd.read_csv(SLUGS_FILE, parse_dates=[1])
     slugs = slugs[slugs["Date"]>timerange]
 
     articles = []
@@ -106,19 +101,18 @@ def read_slugs():
         articles.append(extract_article(URL_temp))
         print("----------------------------------------------------")
 
-    with open("slugs.pickle","wb") as f:
+    with open(PICKLE_FILE,"wb") as f:
         pickle.dump(articles, f)
 
 
 def assign_slug():
 
-    with open("slugs.pickle","rb") as f:
+    with open(PICKLE_FILE,"rb") as f:
         articles = pickle.load(f)
 
-    meltwater = pd.read_csv("meltwater.csv")
+    meltwater = pd.read_csv(TRACKER_FILE)
     
-    slugs = pd.read_csv("slug_info.csv", parse_dates=[1])
-    timerange = pd.datetime.dt(2021,6,1)
+    slugs = pd.read_csv(SLUGS_FILE, parse_dates=[1])
     slugs = slugs[slugs["Date"]>timerange]
     
     assigned_slug = []
@@ -131,6 +125,8 @@ def assign_slug():
 
     for i in range(len(meltwater)):
 
+        print("----------------------------------------------------")
+        print(meltwater["Headline"].iloc[i])
         print(meltwater["URL"].iloc[i])
         try:
             """
@@ -139,27 +135,27 @@ def assign_slug():
             """
             Y = vectorizer.transform([extract_article(meltwater["URL"].iloc[i])])
             slugs["tmp"]=cosine_similarity(X,Y)
-            slugs.sort_values(by="tmp",ascending=False,inplace=True)
-            #print(slugs[["Slug","tmp"]].sort_values(by="tmp",ascending=False).head(3))
-            assigned_slug.append(slugs["Slug"].iloc[0])
-            confidence.append("{:.2f},{:.2f}".format(slugs["tmp"].iloc[0],slugs["tmp"].iloc[1]))
+            ranked = slugs.sort_values(by="tmp",ascending=False)
+            
+            if ranked["tmp"].iloc[0]<0.6:
+                assigned_slug.append("Unkown")
+                confidence.append("NA")
+            else:
+                assigned_slug.append(ranked["Slug"].iloc[0])
+                confidence.append("{:.2f},{:.2f}".format(ranked["tmp"].iloc[0],ranked["tmp"].iloc[1]))
 
-        # except requests.exceptions.ConnectionError:
-        #     assigned_slug.append("NA")
-
-        # except requests.exceptions.InvalidSchema:
-        #     assigned_slug.append("NA")    
         except Exception as e:
+            print("Failed:",e)
             assigned_slug.append(e)
             confidence.append("NA")        
 
     meltwater["SLUG"] = assigned_slug
     meltwater["confidence"] = confidence
-    meltwater.to_csv("TMP3.csv")
+    meltwater.to_csv("out-slugs.csv")
 
 
 
-# read_slugs()
+#read_slugs()
 assign_slug()
 
 
